@@ -1,0 +1,39 @@
+services:
+  mysql:
+    image: mysql:latest
+    environment:
+      MYSQL_ROOT_PASSWORD: Liberty10
+      MYSQL_DATABASE: plague_rats_wip
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+      - ./.venv/application/init:/docker-entrypoint-initdb.d/
+    networks:
+      - appnet
+
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    networks:
+      - appnet
+
+  app:
+    build: .
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_USER: root
+      MYSQL_PASSWORD: Liberty10
+      MYSQL_DATABASE: plague_rats_wip
+      REDIS_HOST: redis
+    depends_on:
+      - mysql
+      - redis
+    ports:
+      - "5000:5000"
+    networks:
+      - appnet
+
+networks:
+  appnet:
