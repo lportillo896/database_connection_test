@@ -1,3 +1,5 @@
 redis
-mysql-connector-python
 Flask
+SQLAlchemy
+PyMySQL
+cryptography

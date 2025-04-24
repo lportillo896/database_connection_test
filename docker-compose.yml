@@ -1,9 +1,10 @@
+version: '3.8'
 services:
   mysql:
     image: mysql:latest
     environment:
       MYSQL_ROOT_PASSWORD: Liberty10
-      MYSQL_DATABASE: plague_rats_wip
+      MYSQL_DATABASE: Plague_Rat_Character
     ports:
       - "3307:3306"
     volumes:
@@ -11,6 +12,10 @@ services:
       - ./.venv/application/init:/docker-entrypoint-initdb.d/
     networks:
       - appnet
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 3
 
   redis:
     image: redis:latest
@@ -25,15 +30,19 @@ services:
       MYSQL_HOST: mysql
       MYSQL_USER: root
       MYSQL_PASSWORD: Liberty10
-      MYSQL_DATABASE: plague_rats_wip
+      MYSQL_DATABASE: Plague_Rat_Character
       REDIS_HOST: redis
     depends_on:
       - mysql
       - redis
+    links:
+      - mysql
     ports:
       - "5000:5000"
+    volumes:
+      - .:/app
     networks:
       - appnet
-
+    restart: on-failure
 networks:
   appnet:
