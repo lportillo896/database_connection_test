@@ -27,19 +27,23 @@ def get_achievements():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving data from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             achievements = session.query(Achievement).all()
-            logger.info(type(achievements[0]))
-            result = [achievement.serialize() for achievement in achievements]
-            json_result = json.dumps(result)
-            redis_client.set(cache_key, json_result, ex=3600)
-            return jsonify(result)
-        except Exception as e:
+            if achievements:  # Check if the list is not empty
+                logger.info(type(achievements[0]))
+                result = [achievement.serialize() for achievement in achievements]
+                json_result = json.dumps(result)
+                redis_client.set(cache_key, json_result, ex=3600)
+                return jsonify(result)
+            else:
+                return jsonify([])  # Return an empty list if no achievements found
+        except SQLAlchemyError as e:  # Use SQLAlchemyError for database errors
+            logger.error(f"Error retrieving achievements: {e}")
+            session.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
 
 @app.route("/achievements/<int:achievement_id>", methods=["GET"])
@@ -55,7 +59,7 @@ def get_achievement(achievement_id):
             return jsonify(json.loads(cached_data.decode('utf-8')))
         else:
             print("Retrieving data from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 achievement = session.query(Achievement).filter_by(
                     achievement_id=achievement_id
@@ -68,16 +72,17 @@ def get_achievement(achievement_id):
                     return jsonify(serialized_achievement)
                 else:
                     return jsonify({"error": "Achievement not found"}), 404
-            except Exception as e:
+            except SQLAlchemyError as e:  # Use SQLAlchemyError for database errors
+                logger.error(f"Error retrieving achievement {achievement_id}: {e}")
+                session.rollback()
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             achievement = session.query(Achievement).filter_by(
                 achievement_id=achievement_id
@@ -86,11 +91,12 @@ def get_achievement(achievement_id):
                 return jsonify(achievement.serialize())
             else:
                 return jsonify({"error": "Achievement not found"}), 404
-        except Exception as db_e:
+        except SQLAlchemyError as db_e:  # Use SQLAlchemyError for database errors and rename e
+            logger.error(f"Database error after Redis failure: {db_e}")
+            session.rollback()
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
 
 
 @app.route("/battles/<int:battle_id>", methods=['GET'])
@@ -106,7 +112,7 @@ def get_battle(battle_id):
             return jsonify(json.loads(cached_battle.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             battle = session.query(Battle).filter_by(battle_id=battle_id).first()
             if battle:
@@ -121,12 +127,11 @@ def get_battle(battle_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             battle = session.query(Battle).filter_by(battle_id=battle_id).first()
             if battle:
@@ -137,7 +142,6 @@ def get_battle(battle_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
 
 
 @app.route('/battle_participants/<int:participant_id>', methods=['GET'])
@@ -154,7 +158,7 @@ def get_battle_participant(participant_id):
             return jsonify(json.loads(cached_participant.decode("utf-8")))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             participant = session.query(BattleParticipant).filter_by(participant_id=participant_id).first()
             if participant:
@@ -169,12 +173,11 @@ def get_battle_participant(participant_id):
             return jsonify({'error': str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             participant = session.query(BattleParticipant).filter_by(participant_id=participant_id).first()
             if participant:
@@ -185,8 +188,6 @@ def get_battle_participant(participant_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route('/colonies', methods=['GET'])
 def get_colonies():
@@ -204,20 +205,19 @@ def get_colonies():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         print("Retrieving colonies from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             colonies = session.query(Colony).all()
             result = [colony.serialize() for colony in colonies]
             json_result = json.dumps(result)
             redis_client.set(cache_key, json_result, ex=3600)  # Cache for 1 hour
             return jsonify(result)
-        except Exception as e:
+        except SQLAlchemyError as e:  # Use SQLAlchemyError for database errors
             logger.error(f"Error retrieving colonies: {e}")
+            session.rollback()  # Rollback on database errors
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route('/colonies/<int:colony_id>', methods=['GET'])
 def get_colony(colony_id):
@@ -238,7 +238,7 @@ def get_colony(colony_id):
             return jsonify(json.loads(cached_colony.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             colony = session.query(Colony).filter_by(colony_id=colony_id).first()
             if colony:
@@ -249,29 +249,29 @@ def get_colony(colony_id):
                 return jsonify(serialized_colony)
             else:
                 return jsonify({"error": "Colony not found"}), 404
-        except Exception as e:
+        except SQLAlchemyError as e:  # Use SQLAlchemyError for database errors
             logger.error(f"Error retrieving colony {colony_id}: {e}")
+            session.rollback()  # Rollback on database errors
             return jsonify({"error": "Could not retrieve colony"}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             colony = session.query(Colony).filter_by(colony_id=colony_id).first()
             if colony:
                 return jsonify(colony.serialize())
             else:
                 return jsonify({"error": "Colony not found"}), 404
-        except Exception as db_e:
+        except SQLAlchemyError as db_e:  # Use SQLAlchemyError for database errors
+            logger.error(f"Database error: {db_e}")
+            session.rollback()  # Rollback on database errors
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/colony_progress/<int:colony_id>", methods=['GET'])
 def get_colony_progress(colony_id):
@@ -285,7 +285,7 @@ def get_colony_progress(colony_id):
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info(f"Cache miss for colony progress ID: {colony_id}, retrieving from database and caching.")
-        session = Session()
+        session = Session(bind=engine)
         try:
             progress_data = session.query(ColonyProgress).filter_by(colony_id=colony_id).all()
             if progress_data:
@@ -300,8 +300,6 @@ def get_colony_progress(colony_id):
             return jsonify({"error": "Could not retrieve colony progress"}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route('/colony_rats', methods=['GET'])
 def get_colony_rats():
@@ -319,7 +317,7 @@ def get_colony_rats():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving all colony rats from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             colony_rats = session.query(ColonyRat).all()
             result = [cr.serialize() for cr in colony_rats]
@@ -331,8 +329,6 @@ def get_colony_rats():
             return jsonify({"error": "Could not retrieve colony_rats"}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route('/colony_rats/<int:colony_id>/<int:rat_id>', methods=['GET'])
 def get_colony_rat(colony_id, rat_id):
@@ -347,7 +343,7 @@ def get_colony_rat(colony_id, rat_id):
             return jsonify(json.loads(cached_colony_rat.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             colony_rat = session.query(ColonyRat).filter_by(colony_id=colony_id, rat_id=rat_id).first()
             if colony_rat:
@@ -363,12 +359,11 @@ def get_colony_rat(colony_id, rat_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             colony_rat = session.query(ColonyRat).filter_by(colony_id=colony_id, rat_id=rat_id).first()
             if colony_rat:
@@ -380,8 +375,6 @@ def get_colony_rat(colony_id, rat_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/day_night_times", methods=["GET"])
 def get_day_night_times():
@@ -396,7 +389,7 @@ def get_day_night_times():
             return jsonify(json.loads(cached_day_night_times.decode('utf-8')))
         else:
             logger.info("Retrieving day/night times from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 day_night_times = session.query(DayNightTime).all()
                 result = [dnt.serialize() for dnt in day_night_times]
@@ -409,12 +402,11 @@ def get_day_night_times():
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             day_night_times = session.query(DayNightTime).all()
             return jsonify([dnt.serialize() for dnt in day_night_times])
@@ -423,8 +415,6 @@ def get_day_night_times():
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/day_night_times/<int:time_id>", methods=["GET"])
 def get_day_night_time(time_id):
@@ -440,7 +430,7 @@ def get_day_night_time(time_id):
             return jsonify(json.loads(cached_time.decode("utf-8")))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             day_night_time = session.query(DayNightTime).filter(DayNightTime.time_id == time_id).first()
             if day_night_time:
@@ -455,12 +445,11 @@ def get_day_night_time(time_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             day_night_time = session.query(DayNightTime).filter(DayNightTime.time_id == time_id).first()
             if day_night_time:
@@ -471,8 +460,6 @@ def get_day_night_time(time_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/economy", methods=['GET'])
 def get_all_economy_transactions():
@@ -486,7 +473,7 @@ def get_all_economy_transactions():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving economy transactions from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             transactions = session.query(Economy).all()
             result = [transaction.serialize() for transaction in transactions]
@@ -498,8 +485,6 @@ def get_all_economy_transactions():
             return jsonify({"error": "Could not retrieve economy transactions"}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/economy/<int:transaction_id>", methods=['GET'])
 def get_economy_transaction(transaction_id):
@@ -515,7 +500,7 @@ def get_economy_transaction(transaction_id):
             return jsonify(json.loads(cached_transaction.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             transaction = session.query(Economy).filter_by(
                 transaction_id=transaction_id
@@ -534,12 +519,11 @@ def get_economy_transaction(transaction_id):
             return jsonify({"error": "Could not retrieve economy transaction"}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             transaction = session.query(Economy).filter_by(
                 transaction_id=transaction_id
@@ -553,8 +537,6 @@ def get_economy_transaction(transaction_id):
             return jsonify({"error": "Could not retrieve economy transaction"}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/effect_types", methods=["GET"])
 def get_effect_types():
@@ -568,7 +550,7 @@ def get_effect_types():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving effect types from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             effect_types = session.query(EffectType).all()
             result = [effect_type.serialize() for effect_type in effect_types]
@@ -580,8 +562,6 @@ def get_effect_types():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/effect_types/<int:effect_type_id>", methods=["GET"])
 def get_effect_type(effect_type_id):
@@ -597,7 +577,7 @@ def get_effect_type(effect_type_id):
             return jsonify(json.loads(cached_effect_type.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             effect_type = session.query(EffectType).filter(
                 EffectType.effect_type_id == effect_type_id).first()
@@ -615,12 +595,11 @@ def get_effect_type(effect_type_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             effect_type = session.query(EffectType).filter(
                 EffectType.effect_type_id == effect_type_id).first()
@@ -633,8 +612,6 @@ def get_effect_type(effect_type_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/equipment", methods=["GET"])
 def get_equipments():
@@ -648,7 +625,7 @@ def get_equipments():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving equipment from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             equipments = session.query(Equipment).all()
             result = [equipment.serialize() for equipment in equipments]
@@ -660,8 +637,6 @@ def get_equipments():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/equipment/<int:equipment_id>", methods=["GET"])
 def get_equipment(equipment_id):
@@ -677,7 +652,7 @@ def get_equipment(equipment_id):
             return jsonify(json.loads(cached_equipment.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             equipment = session.query(Equipment).filter_by(equipment_id=equipment_id).first()
             if equipment:
@@ -693,12 +668,11 @@ def get_equipment(equipment_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             equipment = session.query(Equipment).filter_by(equipment_id=equipment_id).first()
             if equipment:
@@ -709,8 +683,6 @@ def get_equipment(equipment_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/game_events", methods=["GET"])
 def get_game_events():
@@ -723,7 +695,7 @@ def get_game_events():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving all game events from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             game_events = session.query(GameEvent).all()
             result = [event.serialize() for event in game_events]
@@ -735,8 +707,6 @@ def get_game_events():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/game_events/<int:event_id>", methods=["GET"])
 def get_game_event(event_id):
@@ -751,7 +721,7 @@ def get_game_event(event_id):
             return jsonify(json.loads(cached_event.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             game_event = session.query(GameEvent).filter(GameEvent.event_id == event_id).first()
             if game_event:
@@ -767,12 +737,11 @@ def get_game_event(event_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             game_event = session.query(GameEvent).filter(GameEvent.event_id == event_id).first()
             if game_event:
@@ -784,8 +753,6 @@ def get_game_event(event_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/items", methods=["GET"])
 def get_items():
@@ -799,7 +766,7 @@ def get_items():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving items from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             items = session.query(Item).all()
             result = [item.serialize() for item in items]
@@ -811,8 +778,6 @@ def get_items():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/items/<int:item_id>", methods=["GET"])
 def get_item(item_id):
@@ -827,7 +792,7 @@ def get_item(item_id):
             return jsonify(json.loads(cached_item.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             item = session.query(Item).filter_by(item_id=item_id).first()
             if item:
@@ -842,12 +807,11 @@ def get_item(item_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             item = session.query(Item).filter_by(item_id=item_id).first()
             if item:
@@ -858,8 +822,6 @@ def get_item(item_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plagues", methods=['GET'])
 def get_plagues():
@@ -873,7 +835,7 @@ def get_plagues():
             return jsonify(json.loads(cached_plagues.decode('utf-8')))
         else:
             logger.info("Retrieving plagues from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 plagues = session.query(Plague).all()
                 result = [plague.serialize() for plague in plagues]
@@ -884,11 +846,11 @@ def get_plagues():
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             plagues = session.query(Plague).all()
             return jsonify([plague.serialize() for plague in plagues])
@@ -896,8 +858,6 @@ def get_plagues():
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plagues/<int:plague_id>", methods=['GET'])
 def get_plague(plague_id):
@@ -910,7 +870,7 @@ def get_plague(plague_id):
             logger.info(f"Cache hit for plague ID: {plague_id}")
             return jsonify(json.loads(cached_plague.decode('utf-8')))
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             plague = session.query(Plague).filter_by(plague_id=plague_id).first()
             if plague:
@@ -925,11 +885,11 @@ def get_plague(plague_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             plague = session.query(Plague).filter_by(plague_id=plague_id).first()
             if plague:
@@ -940,8 +900,6 @@ def get_plague(plague_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plague_affected", methods=['GET'])
 def get_all_plague_affected():
@@ -955,7 +913,7 @@ def get_all_plague_affected():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving all plague affected from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             plague_affected_list = session.query(PlagueAffected).all()
             result = [item.serialize() for item in plague_affected_list]
@@ -967,8 +925,6 @@ def get_all_plague_affected():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plague_affected/<int:relation_id>", methods=['GET'])
 def get_plague_affected_by_id(relation_id):
@@ -984,7 +940,7 @@ def get_plague_affected_by_id(relation_id):
             return jsonify(json.loads(cached_data.decode('utf-8')))
         else:
             logger.info(f"Cache miss for plague_affected ID: {relation_id}, retrieving from DB and caching")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 plague_affected = session.query(PlagueAffected).filter_by(
                     relation_id=relation_id
@@ -1001,12 +957,11 @@ def get_plague_affected_by_id(relation_id):
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             plague_affected = session.query(PlagueAffected).filter_by(
                 relation_id=relation_id
@@ -1020,8 +975,6 @@ def get_plague_affected_by_id(relation_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plague_rats", methods=['GET'])
 def get_plague_rats():
@@ -1035,19 +988,19 @@ def get_plague_rats():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving plague rats from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             plague_rats = session.query(PlagueRat).all()
             result = [rat.serialize() for rat in plague_rats]
             json_result = json.dumps(result)
             redis_client.set(cache_key, json_result, ex=3600)  # Cache for 1 hour
             return jsonify(result)
-        except Exception as e:
+        except SQLAlchemyError as e:  # Use SQLAlchemyError
+            logger.error(f"Error retrieving plague rats: {e}")
+            session.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/plague_rats/<int:rat_id>", methods=['GET'])
 def get_plague_rat(rat_id):
@@ -1063,9 +1016,9 @@ def get_plague_rat(rat_id):
             return jsonify(json.loads(cached_rat.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
-            plague_rat = session.query(PlagueRat).filter_by(rat_id=rat_id).first()
+            plague_rat = session.query(PlagueRat).filter_by(plague_rat_id=rat_id).first() # Use the correct model attribute
             if plague_rat:
                 serialized_rat = plague_rat.serialize()
                 # Store in Redis cache with expiry
@@ -1074,28 +1027,29 @@ def get_plague_rat(rat_id):
                 return jsonify(serialized_rat)
             else:
                 return jsonify({"error": "Plague Rat not found"}), 404
-        except Exception as e:
+        except SQLAlchemyError as e:  # Use SQLAlchemyError
+            logger.error(f"Error retrieving plague rat {rat_id}: {e}")
+            session.rollback()
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
-            plague_rat = session.query(PlagueRat).filter_by(rat_id=rat_id).first()
+            plague_rat = session.query(PlagueRat).filter_by(plague_rat_id=rat_id).first() # Use the correct model attribute
             if plague_rat:
                 return jsonify(plague_rat.serialize())
             else:
                 return jsonify({"error": "Plague Rat not found"}), 404
-        except Exception as db_e:
+        except SQLAlchemyError as db_e:  # Use SQLAlchemyError
+            logger.error(f"Database error after Redis failure: {db_e}")
+            session.rollback()
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/players", methods=["GET"])
 def get_players():
@@ -1108,7 +1062,7 @@ def get_players():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving all players from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             players = session.query(Player).all()
             result = [player.serialize() for player in players]
@@ -1120,8 +1074,6 @@ def get_players():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/players/<int:player_id>", methods=["GET"])
 def get_player(player_id):
@@ -1136,7 +1088,7 @@ def get_player(player_id):
             return jsonify(json.loads(cached_player.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             player = session.query(Player).filter(Player.player_id == player_id).first()
             if player:
@@ -1152,11 +1104,11 @@ def get_player(player_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine to the session
         try:
             player = session.query(Player).filter(Player.player_id == player_id).first()
             if player:
@@ -1168,8 +1120,6 @@ def get_player(player_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/player_achievements", methods=['GET'])
 def get_player_achievements():
@@ -1182,7 +1132,7 @@ def get_player_achievements():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         print("Retrieving data from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_achievements = session.query(PlayerAchievement).all()
             result = [pa.serialize() for pa in player_achievements]
@@ -1193,8 +1143,6 @@ def get_player_achievements():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/player_achievements/<int:player_achievement_id>", methods=['GET'])
 def get_player_achievement(player_achievement_id):
@@ -1207,7 +1155,7 @@ def get_player_achievement(player_achievement_id):
             return jsonify(json.loads(cached_achievement.decode('utf-8')))
         else:
             print("Retrieving data from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 player_achievement = session.query(PlayerAchievement).filter_by(player_achievement_id=player_achievement_id).first()
                 if player_achievement:
@@ -1221,10 +1169,10 @@ def get_player_achievement(player_achievement_id):
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
+
     except redis.exceptions.ConnectionError as e:
         print(f"Error connecting to Redis: {e}")
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_achievement = session.query(PlayerAchievement).filter_by(player_achievement_id=player_achievement_id).first()
             if player_achievement:
@@ -1235,8 +1183,6 @@ def get_player_achievement(player_achievement_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/players/<int:player_id>/achievements", methods=['GET'])
 def get_player_achievements_by_player(player_id):
@@ -1250,7 +1196,7 @@ def get_player_achievements_by_player(player_id):
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info(f"Cache miss for player {player_id} achievements, retrieving from DB and caching")
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_achievements = session.query(PlayerAchievement).filter_by(player_id=player_id).all()
             result = [pa.serialize() for pa in player_achievements]
@@ -1261,8 +1207,6 @@ def get_player_achievements_by_player(player_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/achievements/<int:achievement_id>/players", methods=['GET'])
 def get_players_by_achievement(achievement_id):
@@ -1276,7 +1220,7 @@ def get_players_by_achievement(achievement_id):
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info(f"Cache miss for achievement {achievement_id} players, retrieving from DB and caching")
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_achievements = session.query(PlayerAchievement).filter_by(achievement_id=achievement_id).all()
             result = [pa.serialize() for pa in player_achievements]
@@ -1287,8 +1231,6 @@ def get_players_by_achievement(achievement_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/player_equipment", methods=['GET'])
 def get_all_player_equipment():
@@ -1301,7 +1243,7 @@ def get_all_player_equipment():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving all player equipment from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_equipments = session.query(PlayerEquipment).all()
             result = [pe.serialize() for pe in player_equipments]
@@ -1312,8 +1254,6 @@ def get_all_player_equipment():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/player_equipment/<int:player_equipment_id>", methods=['GET'])
 def get_player_equipment_by_id(player_equipment_id):
@@ -1328,7 +1268,7 @@ def get_player_equipment_by_id(player_equipment_id):
             return jsonify(json.loads(cached_equipment.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_equipment = session.query(PlayerEquipment).filter_by(player_equipment_id=player_equipment_id).first()
             if player_equipment:
@@ -1343,11 +1283,11 @@ def get_player_equipment_by_id(player_equipment_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             player_equipment = session.query(PlayerEquipment).filter_by(player_equipment_id=player_equipment_id).first()
             if player_equipment:
@@ -1358,8 +1298,6 @@ def get_player_equipment_by_id(player_equipment_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/severities", methods=["GET"])
 def get_severities():
@@ -1372,7 +1310,7 @@ def get_severities():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving severities from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)
         try:
             severities = session.query(Severity).all()
             result = [severity.serialize() for severity in severities]
@@ -1384,8 +1322,6 @@ def get_severities():
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/severities/<int:severity_id>", methods=["GET"])
 def get_severity(severity_id):
@@ -1400,7 +1336,7 @@ def get_severity(severity_id):
             return jsonify(json.loads(cached_severity.decode('utf-8')))
 
         # If not in cache, fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             severity = session.query(Severity).filter_by(severity_id=severity_id).first()
             if severity:
@@ -1416,12 +1352,11 @@ def get_severity(severity_id):
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             severity = session.query(Severity).filter_by(severity_id=severity_id).first()
             if severity:
@@ -1433,8 +1368,6 @@ def get_severity(severity_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/stats", methods=['GET'])
 def get_all_stats():
@@ -1448,7 +1381,7 @@ def get_all_stats():
             return jsonify(json.loads(cached_data.decode('utf-8')))
         else:
             logger.info("Retrieving all stats from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 stats = session.query(Stats).all()
                 result = [stat.serialize() for stat in stats]
@@ -1460,11 +1393,11 @@ def get_all_stats():
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             stats = session.query(Stats).all()
             return jsonify([stat.serialize() for stat in stats])
@@ -1472,8 +1405,6 @@ def get_all_stats():
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/stats/<int:player_id>", methods=['GET'])
 def get_stats(player_id):
@@ -1487,7 +1418,7 @@ def get_stats(player_id):
             return jsonify(json.loads(cached_stats.decode('utf-8')))
         else:
             logger.info(f"Cache miss for player stats ID: {player_id}, retrieving from database and caching.")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 stat = session.query(Stats).filter_by(player_id=player_id).first()
                 if stat:
@@ -1501,11 +1432,11 @@ def get_stats(player_id):
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
+
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             stat = session.query(Stats).filter_by(player_id=player_id).first()
             if stat:
@@ -1516,8 +1447,6 @@ def get_stats(player_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/weather", methods=['GET'])
 def get_all_weather():
@@ -1532,7 +1461,7 @@ def get_all_weather():
             return jsonify(json.loads(cached_data.decode('utf-8')))
         else:
             logger.info("Retrieving all weather data from database and caching in Redis")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 weather_list = session.query(Weather).all()
                 result = [weather.serialize() for weather in weather_list]
@@ -1544,12 +1473,11 @@ def get_all_weather():
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             weather_list = session.query(Weather).all()
             return jsonify([weather.serialize() for weather in weather_list])
@@ -1557,8 +1485,6 @@ def get_all_weather():
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/weather/<int:weather_id>", methods=['GET'])
 def get_weather_by_id(weather_id):
@@ -1573,7 +1499,7 @@ def get_weather_by_id(weather_id):
             return jsonify(json.loads(cached_data.decode('utf-8')))
         else:
             logger.info(f"Cache miss for weather ID: {weather_id}, retrieving from database and caching")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 weather = session.query(Weather).filter_by(weather_id=weather_id).first()
                 if weather:
@@ -1588,12 +1514,11 @@ def get_weather_by_id(weather_id):
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             weather = session.query(Weather).filter_by(weather_id=weather_id).first()
             if weather:
@@ -1604,8 +1529,6 @@ def get_weather_by_id(weather_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/weather_effects", methods=["GET"])
 def get_weather_effects():
@@ -1619,20 +1542,19 @@ def get_weather_effects():
         return jsonify(json.loads(cached_data.decode('utf-8')))
     else:
         logger.info("Retrieving weather effects from database and caching in Redis")
-        session = Session()
+        session = Session(bind=engine)  # Bind the engine here
         try:
             weather_effects = session.query(WeatherEffects).all()
             result = [we.serialize() for we in weather_effects]
             json_result = json.dumps(result)
             redis_client.set(cache_key, json_result, ex=3600)  # Cache for 1 hour
             return jsonify(result)
-        except Exception as e:
+        except SQLAlchemyError as e:  # Use SQLAlchemyError
             logger.error(f"Error retrieving weather effects: {e}")
+            session.rollback()  # Add rollback
             return jsonify({"error": str(e)}), 500
         finally:
             session.close()
-            return None
-
 
 @app.route("/weather_effects/<int:effect_id>", methods=["GET"])
 def get_weather_effect(effect_id):
@@ -1648,7 +1570,7 @@ def get_weather_effect(effect_id):
             return jsonify(json.loads(cached_effect.decode('utf-8')))
         else:
             logger.info(f"Cache miss for weather effect ID: {effect_id}, retrieving from database and caching")
-            session = Session()
+            session = Session(bind=engine)
             try:
                 weather_effect = session.query(WeatherEffects).filter_by(effect_id=effect_id).first()
                 if weather_effect:
@@ -1663,12 +1585,11 @@ def get_weather_effect(effect_id):
                 return jsonify({"error": str(e)}), 500
             finally:
                 session.close()
-                return None
 
     except redis.exceptions.ConnectionError as e:
         logger.error(f"Error connecting to Redis: {e}")
         # If Redis connection fails, still try to fetch from the database
-        session = Session()
+        session = Session(bind=engine)
         try:
             weather_effect = session.query(WeatherEffects).filter_by(effect_id=effect_id).first()
             if weather_effect:
@@ -1680,7 +1601,6 @@ def get_weather_effect(effect_id):
             return jsonify({"error": str(db_e)}), 500
         finally:
             session.close()
-            return None
 
 if __name__ == '__main__':
     Base.metadata.create_all(engine)

@@ -1,4 +1,3 @@
-version: '3.8'
 services:
   mysql:
     image: mysql:latest
@@ -9,7 +8,7 @@ services:
       - "3307:3306"
     volumes:
       - ./mysql_data:/var/lib/mysql
-      - ./.venv/application/init:/docker-entrypoint-initdb.d/
+      - ./application/init:/docker-entrypoint-initdb.d/
     networks:
       - appnet
     healthcheck:
